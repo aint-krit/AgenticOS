@@ -114,3 +114,53 @@ def test_agent_can_be_unregistered():
     assert result["status"] == "unregistered"
     assert result["agent_id"] == "agent-a"
     assert bus.discover_agents() == []
+
+def test_request_id_is_preserved():
+    bus = AgentBus()
+    agent_a, agent_b = create_active_agents()
+
+    bus.register_agent(agent_a)
+    bus.register_agent(agent_b)
+
+    request_id = "req-correlation-001"
+
+    response = bus.send_message(
+        sender_id="agent-a",
+        receiver_id="agent-b",
+        message={
+            "message_id": "msg-correlation-001",
+            "request_id": request_id,
+            "message_type": "REQUEST",
+            "timestamp": "2026-09-28T00:00:00Z",
+            "payload": {
+                "action": "test_correlation",
+            },
+        },
+    )
+
+    assert response["request_id"] == request_id
+    assert agent_b.received_messages[0]["request_id"] == request_id
+
+def test_invalid_message_type_is_rejected():
+    bus = AgentBus()
+    agent_a, agent_b = create_active_agents()
+
+    bus.register_agent(agent_a)
+    bus.register_agent(agent_b)
+
+    message = {
+        "message_id": "msg-invalid-type",
+        "request_id": "req-invalid-type",
+        "message_type": "TOTALLY_INVALID",
+        "timestamp": "2026-09-28T00:00:00Z",
+        "payload": {
+            "action": "test",
+        },
+    }
+
+    with pytest.raises(ValueError):
+        bus.send_message(
+            sender_id="agent-a",
+            receiver_id="agent-b",
+            message=message,
+        )
