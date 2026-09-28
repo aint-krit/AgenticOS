@@ -1,10 +1,10 @@
+import pytest
+
 from src.agent_bus.bus import AgentBus
 from src.agent_runtime.agent import Agent
 
 
-def test_agent_registration_and_message():
-    bus = AgentBus()
-
+def create_active_agents():
     agent_a = Agent(
         agent_id="agent-a",
         name="Agent A",
@@ -19,6 +19,13 @@ def test_agent_registration_and_message():
 
     agent_a.start()
     agent_b.start()
+
+    return agent_a, agent_b
+
+
+def test_agent_registration_and_message():
+    bus = AgentBus()
+    agent_a, agent_b = create_active_agents()
 
     bus.register_agent(agent_a)
     bus.register_agent(agent_b)
@@ -42,3 +49,46 @@ def test_agent_registration_and_message():
     assert response["sender"] == "agent-b"
     assert response["request_id"] == "req-000001"
     assert len(agent_b.received_messages) == 1
+
+
+def test_invalid_message_is_rejected():
+    bus = AgentBus()
+    agent_a, agent_b = create_active_agents()
+
+    bus.register_agent(agent_a)
+    bus.register_agent(agent_b)
+
+    with pytest.raises(ValueError):
+        bus.send_message(
+            sender_id="agent-a",
+            receiver_id="agent-b",
+            message={
+                "message_id": "msg-invalid",
+                "request_id": "req-invalid",
+                "message_type": "REQUEST",
+            },
+        )
+
+
+def test_unknown_receiver_is_rejected():
+    bus = AgentBus()
+    agent_a, _ = create_active_agents()
+
+    bus.register_agent(agent_a)
+
+    message = {
+        "message_id": "msg-unknown",
+        "request_id": "req-unknown",
+        "message_type": "REQUEST",
+        "timestamp": "2026-09-28T00:00:00Z",
+        "payload": {
+            "action": "test_message",
+        },
+    }
+
+    with pytest.raises(ValueError):
+        bus.send_message(
+            sender_id="agent-a",
+            receiver_id="does-not-exist",
+            message=message,
+        )
