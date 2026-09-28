@@ -164,3 +164,29 @@ def test_invalid_message_type_is_rejected():
             receiver_id="agent-b",
             message=message,
         )
+def test_agent_can_send_message_through_bus():
+    bus = AgentBus()
+    agent_a, agent_b = create_active_agents()
+
+    bus.register_agent(agent_a)
+    bus.register_agent(agent_b)
+
+    response = agent_a.send_message(
+        bus=bus,
+        receiver_id="agent-b",
+        message={
+            "message_id": "msg-runtime-001",
+            "request_id": "req-runtime-001",
+            "message_type": "REQUEST",
+            "timestamp": "2026-09-28T00:00:00Z",
+            "payload": {
+                "action": "runtime_bus_test",
+                "data": "Hello from Agent Runtime",
+            },
+        },
+    )
+
+    assert response["message_type"] == "RESPONSE"
+    assert response["sender"] == "agent-b"
+    assert response["request_id"] == "req-runtime-001"
+    assert len(agent_b.received_messages) == 1

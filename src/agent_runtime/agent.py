@@ -84,3 +84,19 @@ class Agent:
                 "agent": self.agent_id,
             },
         }
+    def send_message(
+        self,
+        bus: Any,
+        receiver_id: str,
+        message: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self.status != "active":
+            raise RuntimeError(
+                f"Agent '{self.agent_id}' is not active."
+            )
+
+        return bus.send_message(
+            sender_id=self.agent_id,
+            receiver_id=receiver_id,
+            message=message,
+        )

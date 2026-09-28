@@ -36,9 +36,9 @@ def main():
     print()
     print("Sending message...")
     
-    response = bus.send_message(
-        sender_id="planner-agent",
-        receiver_id="executor-agent",
+    response = planner.send_message(
+    bus=bus,
+    receiver_id="executor-agent",
         message={
             "message_id": "msg-demo-001",
             "request_id": "req-demo-001",
