@@ -1,0 +1,44 @@
+from src.agent_bus.bus import AgentBus
+from src.agent_runtime.agent import Agent
+
+
+def test_agent_registration_and_message():
+    bus = AgentBus()
+
+    agent_a = Agent(
+        agent_id="agent-a",
+        name="Agent A",
+        capabilities=["test.send"],
+    )
+
+    agent_b = Agent(
+        agent_id="agent-b",
+        name="Agent B",
+        capabilities=["test.receive"],
+    )
+
+    agent_a.start()
+    agent_b.start()
+
+    bus.register_agent(agent_a)
+    bus.register_agent(agent_b)
+
+    response = bus.send_message(
+        sender_id="agent-a",
+        receiver_id="agent-b",
+        message={
+            "message_id": "msg-000001",
+            "request_id": "req-000001",
+            "message_type": "REQUEST",
+            "timestamp": "2026-09-28T00:00:00Z",
+            "payload": {
+                "action": "test_message",
+                "data": "Hello from Agent A",
+            },
+        },
+    )
+
+    assert response["message_type"] == "RESPONSE"
+    assert response["sender"] == "agent-b"
+    assert response["request_id"] == "req-000001"
+    assert len(agent_b.received_messages) == 1
