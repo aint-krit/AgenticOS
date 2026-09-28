@@ -190,3 +190,108 @@ def test_agent_can_send_message_through_bus():
     assert response["sender"] == "agent-b"
     assert response["request_id"] == "req-runtime-001"
     assert len(agent_b.received_messages) == 1
+def test_stopped_sender_cannot_send_message():
+    bus = AgentBus()
+    agent_a, agent_b = create_active_agents()
+
+    bus.register_agent(agent_a)
+    bus.register_agent(agent_b)
+
+    agent_a.stop()
+
+    message = {
+        "message_id": "msg-stopped-sender",
+        "request_id": "req-stopped-sender",
+        "message_type": "REQUEST",
+        "timestamp": "2026-09-28T00:00:00Z",
+        "payload": {
+            "action": "test",
+        },
+    }
+
+    with pytest.raises(RuntimeError):
+        agent_a.send_message(
+            bus=bus,
+            receiver_id="agent-b",
+            message=message,
+        )
+
+
+def test_stopped_receiver_cannot_receive_message():
+    bus = AgentBus()
+    agent_a, agent_b = create_active_agents()
+
+    bus.register_agent(agent_a)
+    bus.register_agent(agent_b)
+
+    agent_b.stop()
+
+    message = {
+        "message_id": "msg-stopped-receiver",
+        "request_id": "req-stopped-receiver",
+        "message_type": "REQUEST",
+        "timestamp": "2026-09-28T00:00:00Z",
+        "payload": {
+            "action": "test",
+        },
+    }
+
+    with pytest.raises(RuntimeError):
+        agent_a.send_message(
+            bus=bus,
+            receiver_id="agent-b",
+            message=message,
+        )
+def test_paused_agent_cannot_send_message():
+    bus = AgentBus()
+    agent_a, agent_b = create_active_agents()
+
+    bus.register_agent(agent_a)
+    bus.register_agent(agent_b)
+
+    agent_a.pause()
+
+    message = {
+        "message_id": "msg-paused-agent",
+        "request_id": "req-paused-agent",
+        "message_type": "REQUEST",
+        "timestamp": "2026-09-28T00:00:00Z",
+        "payload": {
+            "action": "test",
+        },
+    }
+
+    with pytest.raises(RuntimeError):
+        agent_a.send_message(
+            bus=bus,
+            receiver_id="agent-b",
+            message=message,
+        )
+
+
+def test_resumed_agent_can_send_message():
+    bus = AgentBus()
+    agent_a, agent_b = create_active_agents()
+
+    bus.register_agent(agent_a)
+    bus.register_agent(agent_b)
+
+    agent_a.pause()
+    agent_a.resume()
+
+    response = agent_a.send_message(
+        bus=bus,
+        receiver_id="agent-b",
+        message={
+            "message_id": "msg-resumed-agent",
+            "request_id": "req-resumed-agent",
+            "message_type": "REQUEST",
+            "timestamp": "2026-09-28T00:00:00Z",
+            "payload": {
+                "action": "test_resume",
+            },
+        },
+    )
+
+    assert response["payload"]["status"] == "received"
+    assert response["request_id"] == "req-resumed-agent"
