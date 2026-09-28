@@ -92,3 +92,25 @@ def test_unknown_receiver_is_rejected():
             receiver_id="does-not-exist",
             message=message,
         )
+
+def test_duplicate_registration_is_rejected():
+    bus = AgentBus()
+    agent_a, _ = create_active_agents()
+
+    bus.register_agent(agent_a)
+
+    with pytest.raises(ValueError):
+        bus.register_agent(agent_a)
+
+
+def test_agent_can_be_unregistered():
+    bus = AgentBus()
+    agent_a, _ = create_active_agents()
+
+    bus.register_agent(agent_a)
+
+    result = bus.unregister_agent("agent-a")
+
+    assert result["status"] == "unregistered"
+    assert result["agent_id"] == "agent-a"
+    assert bus.discover_agents() == []
