@@ -42,7 +42,7 @@ def activate(agent):
 def test_core_agent_factory_creates_all_agents():
     agents = create_core_agents()
 
-    assert len(agents) == 7
+    assert len(agents) == 8
 
     ids = {
         agent.agent_id
@@ -50,14 +50,15 @@ def test_core_agent_factory_creates_all_agents():
     }
 
     assert ids == {
-        "planner-agent",
-        "executor-agent",
-        "monitor-agent",
-        "memory-agent",
-        "security-agent",
-        "application-agent",
-        "file-agent",
-    }
+    "planner-agent",
+    "executor-agent",
+    "monitor-agent",
+    "memory-agent",
+    "security-agent",
+    "application-agent",
+    "file-agent",
+    "web-agent",
+}
 
 
 def test_all_agents_register_with_global_manager():
@@ -71,7 +72,7 @@ def test_all_agents_register_with_global_manager():
 
     discovered = manager.discover_agents()
 
-    assert len(discovered) == 7
+    assert len(discovered) == 8
 
 
 def test_planner_creates_plan():
