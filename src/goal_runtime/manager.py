@@ -163,20 +163,38 @@ class GoalManager:
                     "Goal message requires an operation."
                 )
 
-            if not goal_id:
-                raise ValueError(
-                    "Goal message requires a goal_id."
-                )
+            operation = operation.upper()
 
-            goal = self.handle_operation(
-                goal_id=goal_id,
-                operation=operation,
-                **{
-                    key: value
-                    for key, value in payload.items()
-                    if key not in {"operation", "goal_id"}
-                },
-            )
+            if operation == "CREATE":
+                if not goal_id:
+                    raise ValueError(
+                        "CREATE goal messages require a goal_id."
+                    )
+                description = payload.get("description")
+                if not isinstance(description, str) or not description.strip():
+                    raise ValueError(
+                        "CREATE goal messages require a non-empty description."
+                    )
+                goal = self.create_goal(
+                    goal_id=goal_id,
+                    description=description,
+                    priority=payload.get("priority", "normal"),
+                    metadata=payload.get("metadata"),
+                )
+            else:
+                if not goal_id:
+                    raise ValueError(
+                        "Goal message requires a goal_id."
+                    )
+                goal = self.handle_operation(
+                    goal_id=goal_id,
+                    operation=operation,
+                    **{
+                        key: value
+                        for key, value in payload.items()
+                        if key not in {"operation", "goal_id"}
+                    },
+                )
 
             return {
                 "message_id": message.get("message_id"),

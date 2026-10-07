@@ -100,6 +100,36 @@ class GlobalAgentManager:
 
         return self.registry[agent_id].copy()
 
+    def discover_by_capability(
+        self,
+        capability: str,
+        active_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return registered agents that advertise a capability."""
+        if not isinstance(capability, str) or not capability.strip():
+            raise ValueError("capability must be a non-empty string.")
+
+        matches = []
+        for registration in self.registry.values():
+            if capability not in registration.get("capabilities", []):
+                continue
+            if active_only and registration.get("status") != "active":
+                continue
+            matches.append(registration.copy())
+        return matches
+
+    def select_agent(
+        self,
+        capability: str,
+    ) -> dict[str, Any]:
+        """Select an active registered agent that provides a capability."""
+        matches = self.discover_by_capability(capability)
+        if not matches:
+            raise ValueError(
+                f"No active agent provides capability '{capability}'."
+            )
+        return matches[0].copy()
+
     def get_agent_status(
         self,
         agent_id: str,
