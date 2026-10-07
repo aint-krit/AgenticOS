@@ -42,7 +42,7 @@ def activate(agent):
 def test_core_agent_factory_creates_all_agents():
     agents = create_core_agents()
 
-    assert len(agents) == 8
+    assert len(agents) == 9
 
     ids = {
         agent.agent_id
@@ -72,7 +72,7 @@ def test_all_agents_register_with_global_manager():
 
     discovered = manager.discover_agents()
 
-    assert len(discovered) == 8
+    assert len(discovered) == 9
 
 
 def test_planner_creates_plan():
@@ -451,3 +451,4 @@ def test_intent_router_rejects_inactive_target_agent():
     assert response["message_type"] == "ERROR"
     assert response["payload"]["error_type"] == "RuntimeError"
     assert "not active" in response["payload"]["error"]
+

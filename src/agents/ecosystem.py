@@ -7,6 +7,7 @@ from src.agents.planner_agent import PlannerAgent
 from src.agents.security_agent import SecurityAgent
 from src.agents.web_agent import WebAgent
 from src.agent_runtime.agent import Agent
+from src.kernel_intelligence.agent import KernelIntelligenceAgent
 
 
 def create_core_agents() -> list[Agent]:
@@ -19,4 +20,5 @@ def create_core_agents() -> list[Agent]:
         ApplicationAgent(),
         FileAgent(),
         WebAgent(),
+        KernelIntelligenceAgent(),
     ]
