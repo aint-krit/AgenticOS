@@ -50,15 +50,16 @@ def test_core_agent_factory_creates_all_agents():
     }
 
     assert ids == {
-    "planner-agent",
-    "executor-agent",
-    "monitor-agent",
-    "memory-agent",
-    "security-agent",
-    "application-agent",
-    "file-agent",
-    "web-agent",
-}
+        "planner-agent",
+        "executor-agent",
+        "monitor-agent",
+        "memory-agent",
+        "security-agent",
+        "application-agent",
+        "file-agent",
+        "web-agent",
+        "kernel-intelligence-agent",
+    }
 
 
 def test_all_agents_register_with_global_manager():
@@ -297,6 +298,7 @@ def test_application_agent_message_without_launching_browser(
     response = agent.receive_message(message)
 
     assert response["message_type"] == "RESPONSE"
+
     assert response["payload"]["status"] == "completed"
     assert response["payload"]["opened"] is True
 
@@ -451,4 +453,3 @@ def test_intent_router_rejects_inactive_target_agent():
     assert response["message_type"] == "ERROR"
     assert response["payload"]["error_type"] == "RuntimeError"
     assert "not active" in response["payload"]["error"]
-
