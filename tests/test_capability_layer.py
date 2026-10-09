@@ -1,3 +1,8 @@
+
+import pytest
+
+from src.capability.service import CapabilityService
+from src.capability.skill import Skill, SkillLibrary
 from src.capability.permissions import PermissionManager
 from src.capability.registry import CapabilityRegistry
 from src.capability.tool import Tool
@@ -280,3 +285,102 @@ def test_tool_unregister_removes_capabilities():
         assert False, "Expected capability to be removed."
     except ValueError:
         pass
+
+def test_capability_audit_records_success():
+    registry = CapabilityRegistry()
+    tool = Tool(
+        tool_id="calculator",
+        name="Calculator",
+        description="Adds two numbers.",
+        handler=add_numbers,
+        capabilities=["calculate"],
+    )
+    registry.register_tool(tool)
+    registry.grant_permission("executor-agent", "calculate")
+
+    result = registry.execute(
+        agent_id="executor-agent",
+        capability="calculate",
+        a=2,
+        b=3,
+    )
+
+    assert result["result"] == 5
+    events = registry.get_audit_log()
+    assert len(events) == 1
+    assert events[0]["outcome"] == "success"
+    assert events[0]["agent_id"] == "executor-agent"
+    assert events[0]["capability"] == "calculate"
+    assert events[0]["tool_id"] == "calculator"
+
+
+def test_capability_audit_records_denial_with_request_id():
+    registry = CapabilityRegistry()
+    registry.register_tool(
+        Tool(
+            tool_id="calculator",
+            name="Calculator",
+            description="Adds two numbers.",
+            handler=add_numbers,
+            capabilities=["calculate"],
+        )
+    )
+
+    with pytest.raises(PermissionError):
+        registry.execute(
+            agent_id="untrusted-agent",
+            capability="calculate",
+            request_id="req-security-denied",
+            a=2,
+            b=3,
+        )
+
+    events = registry.get_audit_log("req-security-denied")
+    assert len(events) == 1
+    assert events[0]["outcome"] == "denied"
+    assert events[0]["error_type"] == "PermissionError"
+
+
+def test_skill_preflight_prevents_partial_execution():
+    registry = CapabilityRegistry()
+    executed = []
+
+    registry.register_tool(
+        Tool(
+            tool_id="first-tool",
+            name="First tool",
+            description="Records the first operation.",
+            handler=lambda: executed.append("first"),
+            capabilities=["first_capability"],
+        )
+    )
+    registry.register_tool(
+        Tool(
+            tool_id="second-tool",
+            name="Second tool",
+            description="Records the second operation.",
+            handler=lambda: executed.append("second"),
+            capabilities=["second_capability"],
+        )
+    )
+
+    registry.grant_permission("executor-agent", "first_capability")
+
+    skills = SkillLibrary()
+    skills.register_skill(
+        Skill(
+            skill_id="two-step-skill",
+            name="Two-step skill",
+            description="Requires two capabilities.",
+            capabilities=["first_capability", "second_capability"],
+        )
+    )
+    service = CapabilityService(registry, skills)
+
+    with pytest.raises(PermissionError):
+        service.execute_skill(
+            agent_id="executor-agent",
+            skill_id="two-step-skill",
+        )
+
+    assert executed == []

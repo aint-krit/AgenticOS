@@ -1,3 +1,4 @@
+
 from typing import Any
 
 from src.capability.connector import Connector
@@ -6,27 +7,7 @@ from src.capability.skill import SkillLibrary
 
 
 class CapabilityService:
-    """
-    High-level Capability Layer orchestration.
-
-    Execution chain:
-
-        Agent
-          ↓
-        Skill / Capability
-          ↓
-        Capability Registry
-          ↓
-        Permission Check
-          ↓
-        Tool
-          ↓
-        Connector
-          ↓
-        Execute
-          ↓
-        Verify
-    """
+    """High-level orchestration for capabilities, skills, and connectors."""
 
     def __init__(
         self,
@@ -35,9 +16,8 @@ class CapabilityService:
     ):
         self.registry = registry
         self.skill_library = (
-            skill_library or SkillLibrary()
+            skill_library if skill_library is not None else SkillLibrary()
         )
-
         self.connectors: dict[str, Connector] = {}
 
     def register_connector(
@@ -46,14 +26,10 @@ class CapabilityService:
     ) -> dict[str, Any]:
         if connector.connector_id in self.connectors:
             raise ValueError(
-                f"Connector '{connector.connector_id}' "
-                "is already registered."
+                f"Connector '{connector.connector_id}' is already registered."
             )
 
-        self.connectors[
-            connector.connector_id
-        ] = connector
-
+        self.connectors[connector.connector_id] = connector
         return {
             "status": "registered",
             "connector": connector.health(),
@@ -69,15 +45,12 @@ class CapabilityService:
             )
 
         del self.connectors[connector_id]
-
         return {
             "status": "unregistered",
             "connector_id": connector_id,
         }
 
-    def discover_connectors(
-        self,
-    ) -> list[dict[str, Any]]:
+    def discover_connectors(self) -> list[dict[str, Any]]:
         return [
             connector.health()
             for connector in self.connectors.values()
@@ -89,10 +62,6 @@ class CapabilityService:
         capability: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """
-        Execute a single capability through the registry.
-        """
-
         return self.registry.execute(
             agent_id=agent_id,
             capability=capability,
@@ -105,28 +74,27 @@ class CapabilityService:
         skill_id: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """
-        Execute every capability belonging to a skill.
+        """Preflight all capabilities before executing any skill operation."""
+        capabilities = self.skill_library.resolve_capabilities(skill_id)
 
-        v0.1 executes the capabilities sequentially.
-        """
-
-        capabilities = (
-            self.skill_library.resolve_capabilities(
-                skill_id
-            )
-        )
-
-        results = []
-
+        # Phase 1: validate the complete skill without executing side effects.
         for capability in capabilities:
-            result = self.execute_capability(
-                agent_id=agent_id,
-                capability=capability,
-                **kwargs,
+            self.registry.get_tool_for_capability(capability)
+            self.registry.permission_manager.require_permission(
+                agent_id,
+                capability,
             )
 
-            results.append(result)
+        # Phase 2: execute only after the entire preflight succeeds.
+        results = []
+        for capability in capabilities:
+            results.append(
+                self.execute_capability(
+                    agent_id=agent_id,
+                    capability=capability,
+                    **kwargs,
+                )
+            )
 
         return {
             "status": "completed",
@@ -134,8 +102,7 @@ class CapabilityService:
             "skill_id": skill_id,
             "results": results,
             "verified": all(
-                result["verified"]
-                for result in results
+                result["verified"] for result in results
             ),
         }
 
@@ -147,17 +114,8 @@ class CapabilityService:
         operation: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """
-        Execute a connector operation after the normal
-        capability permission check.
-        """
-
-        # Resolve the capability first.
-        self.registry.get_tool_for_capability(
-            capability
-        )
-
-        # Check permission before touching the connector.
+        """Authorize before invoking a connector."""
+        self.registry.get_tool_for_capability(capability)
         self.registry.permission_manager.require_permission(
             agent_id,
             capability,
@@ -169,11 +127,7 @@ class CapabilityService:
             )
 
         connector = self.connectors[connector_id]
-
-        result = connector.execute(
-            operation=operation,
-            **kwargs,
-        )
+        result = connector.execute(operation=operation, **kwargs)
 
         return {
             "status": "completed",

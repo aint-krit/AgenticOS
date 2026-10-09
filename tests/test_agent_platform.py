@@ -162,3 +162,79 @@ def test_multi_step_dependency_execution(tmp_path):
     assert first.exists() and second.exists()
     assert workflows.workflows["workflow-multi"].tasks["task-1"].status == "completed"
     assert workflows.workflows["workflow-multi"].tasks["task-2"].status == "completed"
+
+def test_unauthorized_capability_never_reaches_agent(tmp_path):
+    platform, _, registry, _, _ = build_platform(tmp_path)
+    registry.revoke_permission("file-agent", "create_file")
+    target = tmp_path / "blocked.txt"
+
+    with pytest.raises(PermissionError):
+        platform.execute_intent(
+            intent="create_file",
+            description="Unauthorized file creation",
+            payload={"path": str(target), "content": "blocked"},
+            request_id="req-denied",
+        )
+
+    assert not target.exists()
+
+    trace = platform.trace["req-denied"]
+    assert any(
+        event["stage"] == "security.authorization"
+        and event["status"] == "denied"
+        for event in trace
+    )
+    assert any(
+        event["stage"] == "workflow.task"
+        and event["status"] == "failed"
+        for event in trace
+    )
+    assert not any(
+        event["stage"] == "agent_bus.dispatch"
+        for event in trace
+    )
+
+    audit = registry.get_audit_log("req-denied")
+    assert len(audit) == 1
+    assert audit[0]["outcome"] == "denied"
+    assert audit[0]["error_type"] == "PermissionError"
+
+def test_route_owner_mismatch_is_denied_before_dispatch(tmp_path):
+    platform, _, registry, _, _ = build_platform(tmp_path)
+    target = tmp_path / "route-owner-blocked.txt"
+
+    # Simulate the manager selecting an agent other than the registered
+    # owner of the create_file capability route.
+    platform.select_agent = lambda capability: "application-agent"
+
+    with pytest.raises(PermissionError, match="does not match route owner"):
+        platform.execute_intent(
+            intent="create_file",
+            description="Reject a mismatched route owner",
+            payload={
+                "path": str(target),
+                "content": "must not be written",
+            },
+            request_id="req-route-owner-mismatch",
+        )
+
+    assert not target.exists()
+
+    trace = platform.trace["req-route-owner-mismatch"]
+    denied = [
+        event for event in trace
+        if event["stage"] == "security.authorization"
+        and event["status"] == "denied"
+    ]
+    assert len(denied) == 1
+    assert denied[0]["agent_id"] == "application-agent"
+    assert denied[0]["route_owner"] == "file-agent"
+
+    assert not any(
+        event["stage"] == "agent_bus.dispatch"
+        for event in trace
+    )
+
+    audit = registry.get_audit_log("req-route-owner-mismatch")
+    assert len(audit) == 1
+    assert audit[0]["outcome"] == "denied"
