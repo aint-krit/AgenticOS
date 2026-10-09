@@ -529,3 +529,50 @@ def test_file_agent_bus_message_succeeds_with_permission(
     assert response["message_type"] == "RESPONSE"
     assert response["payload"]["status"] == "created"
     assert target.read_text(encoding="utf-8") == "authorized"
+
+def test_file_agent_direct_method_requires_permission_when_manager_configured(
+    tmp_path: Path,
+):
+    from src.capability.permissions import PermissionManager
+
+    permissions = PermissionManager()
+    agent = FileAgent(permission_manager=permissions)
+    target = tmp_path / "denied-direct.txt"
+
+    with pytest.raises(PermissionError):
+        agent.create_file(str(target), "must not be written")
+
+    assert not target.exists()
+
+
+def test_file_agent_direct_method_succeeds_with_permission(
+    tmp_path: Path,
+):
+    from src.capability.permissions import PermissionManager
+
+    permissions = PermissionManager()
+    permissions.grant("file-agent", "create_file")
+    agent = FileAgent(permission_manager=permissions)
+    target = tmp_path / "authorized-direct.txt"
+
+    result = agent.create_file(str(target), "authorized")
+
+    assert result["status"] == "created"
+    assert target.read_text(encoding="utf-8") == "authorized"
+
+
+def test_file_agent_denied_direct_write_does_not_change_existing_file(
+    tmp_path: Path,
+):
+    from src.capability.permissions import PermissionManager
+
+    target = tmp_path / "protected.txt"
+    target.write_text("original", encoding="utf-8")
+
+    permissions = PermissionManager()
+    agent = FileAgent(permission_manager=permissions)
+
+    with pytest.raises(PermissionError):
+        agent.write_file(str(target), "modified")
+
+    assert target.read_text(encoding="utf-8") == "original"

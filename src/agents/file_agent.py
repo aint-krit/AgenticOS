@@ -8,7 +8,7 @@ from src.capability.permissions import PermissionManager
 
 
 class FileAgent(Agent):
-    """File operations with fail-closed Agent Bus authorization."""
+    """File operations with permission enforcement."""
 
     OPERATION_CAPABILITIES = {
         "CREATE_FILE": "create_file",
@@ -39,14 +39,22 @@ class FileAgent(Agent):
         self,
         permission_manager: PermissionManager,
     ) -> None:
-        """Attach the shared authorization manager."""
         self.permission_manager = permission_manager
 
+    def _require_permission(self, capability: str) -> None:
+        # Preserve legacy direct calls when no manager is configured.
+        # Once a manager is attached, authorization is mandatory.
+        if self.permission_manager is not None:
+            self.permission_manager.require_permission(
+                self.agent_id,
+                capability,
+            )
+
     def _require_message_permission(self, capability: str) -> None:
+        # Message execution always fails closed without a manager.
         if self.permission_manager is None:
             raise PermissionError(
-                "FileAgent has no permission manager configured; "
-                "message execution is denied."
+                "FileAgent has no permission manager configured."
             )
 
         self.permission_manager.require_permission(
@@ -54,23 +62,28 @@ class FileAgent(Agent):
             capability,
         )
 
-    def create_file(
+    @staticmethod
+    def _validate_path(path: str) -> Path:
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("A non-empty file path is required.")
+        return Path(path)
+
+    def _create_file(
         self,
         path: str,
         content: str = "",
     ) -> dict[str, Any]:
-        file_path = Path(path)
+        file_path = self._validate_path(path)
 
         if file_path.exists():
             raise FileExistsError(f"File already exists: {path}")
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-
         return {"status": "created", "path": str(file_path)}
 
-    def read_file(self, path: str) -> dict[str, Any]:
-        file_path = Path(path)
+    def _read_file(self, path: str) -> dict[str, Any]:
+        file_path = self._validate_path(path)
 
         if not file_path.exists():
             raise FileNotFoundError(f"File does not exist: {path}")
@@ -81,19 +94,18 @@ class FileAgent(Agent):
             "content": file_path.read_text(encoding="utf-8"),
         }
 
-    def write_file(
+    def _write_file(
         self,
         path: str,
         content: str,
     ) -> dict[str, Any]:
-        file_path = Path(path)
+        file_path = self._validate_path(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-
         return {"status": "written", "path": str(file_path)}
 
-    def delete_file(self, path: str) -> dict[str, Any]:
-        file_path = Path(path)
+    def _delete_file(self, path: str) -> dict[str, Any]:
+        file_path = self._validate_path(path)
 
         if not file_path.exists():
             raise FileNotFoundError(f"File does not exist: {path}")
@@ -101,11 +113,34 @@ class FileAgent(Agent):
         file_path.unlink()
         return {"status": "deleted", "path": str(file_path)}
 
+    def create_file(
+        self,
+        path: str,
+        content: str = "",
+    ) -> dict[str, Any]:
+        self._require_permission("create_file")
+        return self._create_file(path, content)
+
+    def read_file(self, path: str) -> dict[str, Any]:
+        self._require_permission("read_file")
+        return self._read_file(path)
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+    ) -> dict[str, Any]:
+        self._require_permission("write_file")
+        return self._write_file(path, content)
+
+    def delete_file(self, path: str) -> dict[str, Any]:
+        self._require_permission("delete_file")
+        return self._delete_file(path)
+
     def receive_message(
         self,
         message: dict[str, Any],
     ) -> dict[str, Any]:
-        """Authorize every protected operation before filesystem access."""
         payload = message.get("payload", {})
         operation = payload.get("operation")
         capability = self.OPERATION_CAPABILITIES.get(operation)
@@ -117,25 +152,22 @@ class FileAgent(Agent):
                 )
 
             self._require_message_permission(capability)
-
             path = payload.get("path")
-            if not isinstance(path, str) or not path.strip():
-                raise ValueError("A non-empty file path is required.")
 
             if operation == "CREATE_FILE":
-                result = self.create_file(
-                    path=path,
-                    content=payload.get("content", ""),
+                result = self._create_file(
+                    path,
+                    payload.get("content", ""),
                 )
             elif operation == "READ_FILE":
-                result = self.read_file(path=path)
+                result = self._read_file(path)
             elif operation == "WRITE_FILE":
-                result = self.write_file(
-                    path=path,
-                    content=payload.get("content", ""),
+                result = self._write_file(
+                    path,
+                    payload.get("content", ""),
                 )
             else:
-                result = self.delete_file(path=path)
+                result = self._delete_file(path)
 
             response_type = "RESPONSE"
 
