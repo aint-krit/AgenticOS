@@ -1,22 +1,26 @@
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from src.agent_runtime.agent import Agent
+from src.capability.permissions import PermissionManager
 
 
 class FileAgent(Agent):
-    """
-    Handles basic file operations.
+    """File operations with fail-closed Agent Bus authorization."""
 
-    v0.1 keeps file operations explicit and path-based.
-    Permission enforcement will be expanded by the
-    Capability/Security layer.
-    """
+    OPERATION_CAPABILITIES = {
+        "CREATE_FILE": "create_file",
+        "READ_FILE": "read_file",
+        "WRITE_FILE": "write_file",
+        "DELETE_FILE": "delete_file",
+    }
 
     def __init__(
         self,
         agent_id: str = "file-agent",
+        permission_manager: PermissionManager | None = None,
     ):
         super().__init__(
             agent_id=agent_id,
@@ -29,6 +33,26 @@ class FileAgent(Agent):
                 "delete_file",
             ],
         )
+        self.permission_manager = permission_manager
+
+    def set_permission_manager(
+        self,
+        permission_manager: PermissionManager,
+    ) -> None:
+        """Attach the shared authorization manager."""
+        self.permission_manager = permission_manager
+
+    def _require_message_permission(self, capability: str) -> None:
+        if self.permission_manager is None:
+            raise PermissionError(
+                "FileAgent has no permission manager configured; "
+                "message execution is denied."
+            )
+
+        self.permission_manager.require_permission(
+            self.agent_id,
+            capability,
+        )
 
     def create_file(
         self,
@@ -38,42 +62,23 @@ class FileAgent(Agent):
         file_path = Path(path)
 
         if file_path.exists():
-            raise FileExistsError(
-                f"File already exists: {path}"
-            )
+            raise FileExistsError(f"File already exists: {path}")
 
-        file_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding="utf-8")
 
-        file_path.write_text(
-            content,
-            encoding="utf-8",
-        )
+        return {"status": "created", "path": str(file_path)}
 
-        return {
-            "status": "created",
-            "path": str(file_path),
-        }
-
-    def read_file(
-        self,
-        path: str,
-    ) -> dict[str, Any]:
+    def read_file(self, path: str) -> dict[str, Any]:
         file_path = Path(path)
 
         if not file_path.exists():
-            raise FileNotFoundError(
-                f"File does not exist: {path}"
-            )
+            raise FileNotFoundError(f"File does not exist: {path}")
 
         return {
             "status": "read",
             "path": str(file_path),
-            "content": file_path.read_text(
-                encoding="utf-8"
-            ),
+            "content": file_path.read_text(encoding="utf-8"),
         }
 
     def write_file(
@@ -82,92 +87,74 @@ class FileAgent(Agent):
         content: str,
     ) -> dict[str, Any]:
         file_path = Path(path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding="utf-8")
 
-        file_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        return {"status": "written", "path": str(file_path)}
 
-        file_path.write_text(
-            content,
-            encoding="utf-8",
-        )
-
-        return {
-            "status": "written",
-            "path": str(file_path),
-        }
-
-    def delete_file(
-        self,
-        path: str,
-    ) -> dict[str, Any]:
+    def delete_file(self, path: str) -> dict[str, Any]:
         file_path = Path(path)
 
         if not file_path.exists():
-            raise FileNotFoundError(
-                f"File does not exist: {path}"
-            )
+            raise FileNotFoundError(f"File does not exist: {path}")
 
         file_path.unlink()
-
-        return {
-            "status": "deleted",
-            "path": str(file_path),
-        }
+        return {"status": "deleted", "path": str(file_path)}
 
     def receive_message(
         self,
         message: dict[str, Any],
     ) -> dict[str, Any]:
-        self.received_messages.append(message)
-
+        """Authorize every protected operation before filesystem access."""
         payload = message.get("payload", {})
         operation = payload.get("operation")
-        path = payload.get("path", "")
+        capability = self.OPERATION_CAPABILITIES.get(operation)
 
-        if operation == "CREATE_FILE":
-            result = self.create_file(
-                path=path,
-                content=payload.get(
-                    "content",
-                    "",
-                ),
-            )
+        try:
+            if capability is None:
+                raise ValueError(
+                    f"Unsupported file operation: {operation!r}"
+                )
 
-        elif operation == "READ_FILE":
-            result = self.read_file(
-                path=path,
-            )
+            self._require_message_permission(capability)
 
-        elif operation == "WRITE_FILE":
-            result = self.write_file(
-                path=path,
-                content=payload.get(
-                    "content",
-                    "",
-                ),
-            )
+            path = payload.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("A non-empty file path is required.")
 
-        elif operation == "DELETE_FILE":
-            result = self.delete_file(
-                path=path,
-            )
+            if operation == "CREATE_FILE":
+                result = self.create_file(
+                    path=path,
+                    content=payload.get("content", ""),
+                )
+            elif operation == "READ_FILE":
+                result = self.read_file(path=path)
+            elif operation == "WRITE_FILE":
+                result = self.write_file(
+                    path=path,
+                    content=payload.get("content", ""),
+                )
+            else:
+                result = self.delete_file(path=path)
 
-        else:
+            response_type = "RESPONSE"
+
+        except Exception as error:
             result = {
-                "status": "unsupported_operation",
-                "operation": operation,
+                "status": "error",
+                "error_type": type(error).__name__,
+                "error": str(error),
             }
+            response_type = "ERROR"
+
+        self.received_messages.append(dict(message))
 
         return {
             "message_id": message.get("message_id"),
             "request_id": message.get("request_id"),
             "sender": self.agent_id,
             "receiver": message.get("sender"),
-            "message_type": "RESPONSE",
-            "timestamp": datetime.now(
-                timezone.utc
-            ).isoformat(),
+            "message_type": response_type,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": result,
         }

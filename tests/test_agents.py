@@ -453,3 +453,79 @@ def test_intent_router_rejects_inactive_target_agent():
     assert response["message_type"] == "ERROR"
     assert response["payload"]["error_type"] == "RuntimeError"
     assert "not active" in response["payload"]["error"]
+
+
+def test_file_agent_rejects_bus_message_without_permission_manager(
+    tmp_path: Path,
+):
+    agent = activate(FileAgent())
+    target = tmp_path / "must-not-exist.txt"
+
+    message = make_message(
+        sender="planner-agent",
+        receiver="file-agent",
+        operation="CREATE_FILE",
+        payload={
+            "path": str(target),
+            "content": "unauthorized",
+        },
+    )
+
+    response = agent.receive_message(message)
+
+    assert response["message_type"] == "ERROR"
+    assert response["payload"]["error_type"] == "PermissionError"
+    assert not target.exists()
+
+
+def test_file_agent_bus_message_requires_capability_permission(
+    tmp_path: Path,
+):
+    from src.capability.permissions import PermissionManager
+
+    permissions = PermissionManager()
+    agent = activate(FileAgent(permission_manager=permissions))
+    target = tmp_path / "denied.txt"
+
+    message = make_message(
+        sender="planner-agent",
+        receiver="file-agent",
+        operation="CREATE_FILE",
+        payload={
+            "path": str(target),
+            "content": "denied",
+        },
+    )
+
+    response = agent.receive_message(message)
+
+    assert response["message_type"] == "ERROR"
+    assert response["payload"]["error_type"] == "PermissionError"
+    assert not target.exists()
+
+
+def test_file_agent_bus_message_succeeds_with_permission(
+    tmp_path: Path,
+):
+    from src.capability.permissions import PermissionManager
+
+    permissions = PermissionManager()
+    permissions.grant("file-agent", "create_file")
+    agent = activate(FileAgent(permission_manager=permissions))
+    target = tmp_path / "authorized.txt"
+
+    message = make_message(
+        sender="planner-agent",
+        receiver="file-agent",
+        operation="CREATE_FILE",
+        payload={
+            "path": str(target),
+            "content": "authorized",
+        },
+    )
+
+    response = agent.receive_message(message)
+
+    assert response["message_type"] == "RESPONSE"
+    assert response["payload"]["status"] == "created"
+    assert target.read_text(encoding="utf-8") == "authorized"
