@@ -121,12 +121,16 @@ class Workflow:
 
         self.get_ready_tasks()
 
+
     def check_completion(self) -> None:
+        if self.status in {"completed", "failed", "cancelled"}:
+            return
+
         if not self.tasks:
             return
 
         if all(
-            task.status == "completed"
+            task.status in {"completed", "cancelled"}
             for task in self.tasks.values()
         ):
             self.status = "completed"
@@ -136,12 +140,6 @@ class Workflow:
             for task in self.tasks.values()
         ):
             self.status = "failed"
-
-        elif all(
-            task.status in {"completed", "cancelled"}
-            for task in self.tasks.values()
-        ):
-            self.status = "completed"
 
         self.updated_at = self._timestamp()
     def fail(self) -> None:

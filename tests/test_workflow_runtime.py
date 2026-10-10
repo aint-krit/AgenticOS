@@ -761,3 +761,29 @@ def test_workflow_replanning():
     )
 
     assert workflow.status == "replanning"
+def test_terminal_workflow_status_is_not_overwritten():
+    bus, manager = create_workflow_manager()
+
+    manager.create_workflow(
+        "workflow-terminal",
+        "goal-terminal",
+        "Terminal state test",
+    )
+
+    manager.add_task(
+        "workflow-terminal",
+        Task(
+            "task-001",
+            "Execute task",
+        ),
+    )
+
+    manager.start_workflow("workflow-terminal")
+
+    workflow = manager.get_workflow("workflow-terminal")
+    workflow.fail()
+
+    workflow.get_task("task-001").status = "completed"
+    workflow.check_completion()
+
+    assert workflow.status == "failed"

@@ -64,7 +64,6 @@ class WorkflowManager:
         workflow_id: str,
     ) -> list[Task]:
         workflow = self.get_workflow(workflow_id)
-
         workflow.start()
 
         return [
@@ -78,7 +77,6 @@ class WorkflowManager:
         workflow_id: str,
     ) -> list[Task]:
         workflow = self.get_workflow(workflow_id)
-
         return workflow.get_ready_tasks()
 
     def dispatch_task(
@@ -92,6 +90,11 @@ class WorkflowManager:
     ) -> dict[str, Any]:
         workflow = self.get_workflow(workflow_id)
         task = workflow.get_task(task_id)
+
+        if workflow.status != "running":
+            raise RuntimeError(
+                f"Workflow '{workflow_id}' is not running."
+            )
 
         if task.status != "ready":
             raise RuntimeError(
@@ -117,15 +120,14 @@ class WorkflowManager:
         }
 
         try:
-            response = self.bus.send_message(
+            return self.bus.send_message(
                 sender_id=sender_id,
                 receiver_id=receiver_id,
                 message=message,
             )
-            return response
-
         except (ValueError, RuntimeError):
             task.fail("Task dispatch failed.")
+            workflow.check_completion()
             raise
 
     def complete_task(
@@ -135,13 +137,19 @@ class WorkflowManager:
         result: Any = None,
     ) -> list[Task]:
         workflow = self.get_workflow(workflow_id)
-        task = workflow.get_task(task_id)
 
+        if workflow.status != "running":
+            raise RuntimeError(
+                f"Workflow '{workflow_id}' cannot complete tasks "
+                f"from status '{workflow.status}'."
+            )
+
+        task = workflow.get_task(task_id)
         task.complete(result)
 
         workflow.check_completion()
 
-        if workflow.status == "completed":
+        if workflow.status != "running":
             return []
 
         return workflow.get_ready_tasks()
@@ -153,11 +161,20 @@ class WorkflowManager:
         error: str,
     ) -> list[Task]:
         workflow = self.get_workflow(workflow_id)
-        task = workflow.get_task(task_id)
 
+        if workflow.status != "running":
+            raise RuntimeError(
+                f"Workflow '{workflow_id}' cannot fail tasks "
+                f"from status '{workflow.status}'."
+            )
+
+        task = workflow.get_task(task_id)
         task.fail(error)
 
         workflow.check_completion()
+
+        if workflow.status != "running":
+            return []
 
         return workflow.get_ready_tasks()
 
@@ -169,21 +186,37 @@ class WorkflowManager:
         workflow = self.get_workflow(workflow_id)
         task = workflow.get_task(task_id)
 
+        if workflow.status in {"cancelled", "completed"}:
+            raise RuntimeError(
+                f"Workflow '{workflow_id}' cannot retry tasks "
+                f"from status '{workflow.status}'."
+            )
+
+        # Let Task enforce its retry limit and valid transitions.
         task.retry()
 
+        # A failed workflow may resume only when a failed task
+        # has actually been reset for another attempt.
+        if workflow.status == "failed":
+            workflow.status = "running"
+            workflow.updated_at = workflow._timestamp()
+
         return task
-    def fail_workflow(self, workflow_id: str) -> Workflow:
+
+    def fail_workflow(
+        self,
+        workflow_id: str,
+    ) -> Workflow:
         workflow = self.get_workflow(workflow_id)
         workflow.fail()
         return workflow
+
     def replan_workflow(
         self,
         workflow_id: str,
     ) -> Workflow:
         workflow = self.get_workflow(workflow_id)
-
         workflow.replan()
-
         return workflow
 
     def process_task_result(
@@ -241,7 +274,6 @@ class WorkflowManager:
         Handle a workflow request received through
         the Agent Bus.
         """
-
         try:
             if not isinstance(message, dict):
                 raise ValueError(
@@ -258,12 +290,12 @@ class WorkflowManager:
             operation = payload.get("operation")
             workflow_id = payload.get("workflow_id")
 
-            if not operation:
+            if not isinstance(operation, str) or not operation.strip():
                 raise ValueError(
                     "Workflow message requires an operation."
                 )
 
-            if not workflow_id:
+            if not isinstance(workflow_id, str) or not workflow_id.strip():
                 raise ValueError(
                     "Workflow message requires a workflow_id."
                 )
@@ -271,9 +303,7 @@ class WorkflowManager:
             operation = operation.upper()
 
             if operation == "START":
-                ready_tasks = self.start_workflow(
-                    workflow_id
-                )
+                ready_tasks = self.start_workflow(workflow_id)
 
                 payload_response = {
                     "status": "success",
@@ -286,9 +316,7 @@ class WorkflowManager:
                 }
 
             elif operation == "REPLAN":
-                workflow = self.replan_workflow(
-                    workflow_id
-                )
+                workflow = self.replan_workflow(workflow_id)
 
                 payload_response = {
                     "status": "success",
@@ -312,7 +340,4 @@ class WorkflowManager:
             }
 
         except (ValueError, RuntimeError) as error:
-            return self._error_response(
-                message,
-                error,
-            )
+            return self._error_response(message, error)
