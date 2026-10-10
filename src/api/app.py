@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from src.api.dependencies import (
     get_runtime,
@@ -14,15 +15,24 @@ from src.api.schemas import (
     DeleteFileRequest,
     FileResponse,
     HealthResponse,
+    PromptRequest,
+    PromptResponse,
     SystemResponse,
     WriteFileRequest,
 )
+from src.ui.dashboard import get_dashboard_html
 
 app = FastAPI(
     title="AgenticOS API",
     description="API layer for the AgenticOS agent runtime.",
     version="0.1.0",
 )
+
+
+@app.get("/", response_class=HTMLResponse)
+@app.get("/ui", response_class=HTMLResponse)
+def index() -> HTMLResponse:
+    return HTMLResponse(content=get_dashboard_html(), status_code=200)
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -241,3 +251,38 @@ def delete_file_path(
         description=f"Delete file {file_path}",
         payload={"path": file_path},
     )
+
+
+@app.post("/api/prompt", response_model=PromptResponse)
+def execute_user_prompt(
+    request: PromptRequest,
+    runtime: AgenticOSRuntime = Depends(get_runtime),
+) -> PromptResponse:
+    if not request.prompt or not request.prompt.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Prompt must be a non-empty string.",
+        )
+
+    try:
+        result = runtime.platform.execute_prompt(request.prompt)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return PromptResponse(
+        status=result.get("status", "completed"),
+        request_id=result.get("request_id", ""),
+        prompt=result.get("prompt", request.prompt),
+        verified=result.get("verified", False),
+        clarification_prompt=result.get("clarification_prompt"),
+        goal=result.get("goal"),
+        workflow=result.get("workflow"),
+        intents=result.get("intents", []),
+        results=result.get("results", {}),
+        trace=result.get("trace", []),
+    )
+

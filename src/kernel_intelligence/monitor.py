@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import psutil
 import os
 import platform
 import time
@@ -68,8 +68,30 @@ class ResourceMonitor:
 
         return self._collect_local()
 
+    
     def _collect_local(self) -> ResourceSnapshot:
+        # Collect CPU usage over a short sampling interval.
+        cpu_percent: float | None = None
+        try:
+            cpu_percent = float(psutil.cpu_percent(interval=0.2))
+        except (OSError, RuntimeError):
+            pass
+
+        # Collect total, available, and used memory.
         memory = self._memory_info()
+
+        # Use psutil as a fallback if the existing memory collector
+        # cannot retrieve the system's memory information.
+        if memory["total_mb"] is None:
+            try:
+                virtual_memory = psutil.virtual_memory()
+                memory = {
+                    "total_mb": virtual_memory.total / (1024 * 1024),
+                    "available_mb": virtual_memory.available / (1024 * 1024),
+                    "percent": float(virtual_memory.percent),
+                }
+            except (OSError, RuntimeError):
+                pass
 
         load_average: tuple[float, ...] | None = None
         try:
@@ -82,13 +104,12 @@ class ResourceMonitor:
             timestamp=time.time(),
             platform=platform.system(),
             logical_cpus=os.cpu_count() or 1,
-            cpu_percent=None,
+            cpu_percent=cpu_percent,
             memory_total_mb=memory["total_mb"],
             memory_available_mb=memory["available_mb"],
             memory_percent=memory["percent"],
             load_average=load_average,
         )
-
     @staticmethod
     def _memory_info() -> dict[str, float | None]:
         if platform.system() == "Windows":

@@ -61,6 +61,8 @@ class AgentPlatform:
         "verify_memory": IntentSpec("verify_memory", "VERIFY_MEMORY"),
         "execute_task": IntentSpec("execute_task", "EXECUTE_TASK"),
         "plan_task": IntentSpec("plan_task", "PLAN"),
+        "resource_monitoring": IntentSpec("resource_monitoring", "GET_SNAPSHOT"),
+        "system_info": IntentSpec("resource_monitoring", "GET_SNAPSHOT"),
     }
 
     def __init__(
@@ -604,3 +606,103 @@ class AgentPlatform:
                 )
             ],
         )
+
+    def execute_prompt(
+        self,
+        prompt: str,
+        sender_id: str | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Execute an end-to-end user request from natural language:
+        Prompt -> Intent Intelligence -> Goal -> Workflow -> GAM -> Agents -> Execution.
+        """
+        from src.intent.parser import IntentParser
+
+        request_id = request_id or f"req-{uuid4().hex}"
+        sender_id = sender_id or self.coordinator_agent_id
+        parser = IntentParser()
+
+        self._record(
+            request_id,
+            "human_interface.prompt",
+            "received",
+            prompt=prompt,
+        )
+
+        parsed_intents = parser.parse_composite(prompt)
+        if not parsed_intents:
+            parsed_intents = [parser.parse(prompt)]
+
+        for item in parsed_intents:
+            if item.intent == "blocked":
+                self._record(
+                    request_id,
+                    "security.prompt_inspection",
+                    "blocked",
+                    error=item.error,
+                )
+                raise PermissionError(item.error or "Prompt rejected by security policy.")
+            if item.intent == "ambiguous" or item.clarification_needed:
+                self._record(
+                    request_id,
+                    "intent.ambiguity",
+                    "clarification_needed",
+                    clarification=item.clarification_prompt,
+                )
+                return {
+                    "status": "clarification_needed",
+                    "request_id": request_id,
+                    "prompt": prompt,
+                    "clarification_prompt": item.clarification_prompt,
+                    "verified": False,
+                }
+            if item.intent == "unknown":
+                raise ValueError(item.error or f"Unknown intent for prompt: {prompt}")
+
+        goal_id = f"goal-{uuid4().hex}"
+        workflow_id = f"workflow-{uuid4().hex}"
+        self.goal_manager.create_goal(
+            goal_id=goal_id,
+            description=f"Goal for prompt: '{prompt}'",
+            metadata={
+                "request_id": request_id,
+                "prompt": prompt,
+                "sender_id": sender_id,
+            },
+        )
+        self._record(request_id, "goal", "created", goal_id=goal_id)
+
+        tasks: list[TaskSpec] = []
+        for idx, item in enumerate(parsed_intents, start=1):
+            spec = self.resolve_intent(item.intent)
+            self._record(
+                request_id,
+                "intent",
+                "resolved",
+                intent=item.intent,
+                capability=spec.capability,
+            )
+            tasks.append(
+                TaskSpec(
+                    task_id=f"{workflow_id}-task-{idx}",
+                    description=f"Task {idx}: {item.intent}",
+                    capability=spec.capability,
+                    operation=spec.operation,
+                    payload=dict(item.parameters),
+                    dependencies=[f"{workflow_id}-task-{idx-1}"] if idx > 1 else [],
+                )
+            )
+
+        workflow_result = self.execute_workflow(
+            goal_id=goal_id,
+            workflow_id=workflow_id,
+            request_id=request_id,
+            tasks=tasks,
+        )
+
+        return {
+            **workflow_result,
+            "prompt": prompt,
+            "intents": [i.to_dict() for i in parsed_intents],
+        }

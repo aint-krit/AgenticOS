@@ -29,7 +29,7 @@ class ApplicationAgent(Agent):
 
     def open_browser(
         self,
-        url: str = "about:blank",
+        url: str = "https://www.google.com",
     ) -> dict[str, Any]:
         if not url:
             raise ValueError("Browser URL is required.")
@@ -77,7 +77,7 @@ class ApplicationAgent(Agent):
             result = self.open_browser(
                 url=payload.get(
                     "url",
-                    "about:blank",
+                    "https://www.google.com",
                 )
             )
 

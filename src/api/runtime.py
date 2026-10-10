@@ -80,6 +80,32 @@ def create_runtime() -> AgenticOSRuntime:
         )
         platform.grant_capability("file-agent", capability)
 
+    platform.register_capability_route(
+        "application-agent",
+        "open_browser",
+        "OPEN_BROWSER",
+    )
+    platform.grant_capability("application-agent", "open_browser")
+
+    for capability, operation in (
+        ("remember", "REMEMBER"),
+        ("retrieve_memory", "RETRIEVE_MEMORY"),
+        ("search_memory", "SEARCH_MEMORY"),
+    ):
+        platform.register_capability_route(
+            "memory-agent",
+            capability,
+            operation,
+        )
+        platform.grant_capability("memory-agent", capability)
+
+    platform.register_capability_route(
+        "kernel-intelligence-agent",
+        "resource_monitoring",
+        "GET_SNAPSHOT",
+    )
+    platform.grant_capability("kernel-intelligence-agent", "resource_monitoring")
+
     return AgenticOSRuntime(
         bus=bus,
         agent_manager=agent_manager,

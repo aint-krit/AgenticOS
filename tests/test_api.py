@@ -82,6 +82,17 @@ def client(tmp_path):
     app.dependency_overrides.clear()
 
 
+def test_api_dashboard():
+    client = TestClient(app)
+    res_root = client.get("/")
+    assert res_root.status_code == 200
+    assert "AgenticOS" in res_root.text
+
+    res_ui = client.get("/ui")
+    assert res_ui.status_code == 200
+    assert "AgenticOS" in res_ui.text
+
+
 def test_api_health():
     client = TestClient(app)
     response = client.get("/api/health")

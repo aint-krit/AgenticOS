@@ -54,3 +54,20 @@ class FileResponse(BaseModel):
 FileCreateRequest = CreateFileRequest
 FileWriteRequest = WriteFileRequest
 FileDeleteRequest = DeleteFileRequest
+
+
+class PromptRequest(BaseModel):
+    prompt: str
+
+
+class PromptResponse(BaseModel):
+    status: str
+    request_id: str
+    prompt: str
+    verified: bool = False
+    clarification_prompt: str | None = None
+    goal: dict[str, Any] | None = None
+    workflow: dict[str, Any] | None = None
+    intents: list[dict[str, Any]] = Field(default_factory=list)
+    results: dict[str, Any] = Field(default_factory=dict)
+    trace: list[dict[str, Any]] = Field(default_factory=list)
