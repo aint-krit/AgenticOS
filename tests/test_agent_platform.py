@@ -1,3 +1,4 @@
+
 from pathlib import Path
 
 import pytest
@@ -45,10 +46,14 @@ def build_platform(tmp_path: Path):
         "write_file": "WRITE_FILE",
         "delete_file": "DELETE_FILE",
     }.items():
-        platform.register_capability_route("file-agent", capability, operation)
+        platform.register_capability_route(
+            "file-agent", capability, operation
+        )
         platform.grant_capability("file-agent", capability)
 
-    platform.register_capability_route("application-agent", "open_browser", "OPEN_BROWSER")
+    platform.register_capability_route(
+        "application-agent", "open_browser", "OPEN_BROWSER"
+    )
     platform.grant_capability("application-agent", "open_browser")
 
     return platform, gam, registry, goals, workflows
@@ -86,6 +91,7 @@ def test_goal_create_through_bus():
             },
         },
     )
+
     assert response["message_type"] == "RESPONSE"
     assert response["payload"]["operation"] == "CREATE"
     assert "goal-001" in manager.goals
@@ -107,61 +113,19 @@ def test_end_to_end_create_file(tmp_path):
     assert target.read_text(encoding="utf-8") == "AgenticOS v0.1"
     assert result["goal"]["status"] == "completed"
     assert result["workflow"]["status"] == "completed"
-    assert registry.permission_manager.is_allowed("file-agent", "create_file")
+    assert registry.permission_manager.is_allowed(
+        "file-agent", "create_file"
+    )
     assert goals.goals[result["goal"]["goal_id"]].status == "completed"
-    assert workflows.workflows[result["workflow"]["workflow_id"]].status == "completed"
-    assert any(item["stage"] == "agent_bus.dispatch" for item in result["trace"])
-
-
-def test_unauthorized_capability_never_reaches_agent(tmp_path):
-    platform, _, registry, _, _ = build_platform(tmp_path)
-    registry.revoke_permission("file-agent", "create_file")
-    target = tmp_path / "blocked.txt"
-
-    with pytest.raises(PermissionError):
-        platform.execute_intent(
-            intent="create_file",
-            description="Unauthorized file creation",
-            payload={"path": str(target), "content": "blocked"},
-            request_id="req-denied",
-        )
-
-    assert not target.exists()
-
-
-def test_multi_step_dependency_execution(tmp_path):
-    platform, _, _, goals, workflows = build_platform(tmp_path)
-    first = tmp_path / "first.txt"
-    second = tmp_path / "second.txt"
-    goal = goals.create_goal("goal-multi", "Create two files")
-
-    result = platform.execute_workflow(
-        goal_id=goal.goal_id,
-        workflow_id="workflow-multi",
-        request_id="req-multi",
-        tasks=[
-            TaskSpec(
-                task_id="task-1",
-                description="Create first file",
-                capability="create_file",
-                operation="CREATE_FILE",
-                payload={"path": str(first), "content": "one"},
-            ),
-            TaskSpec(
-                task_id="task-2",
-                description="Create second file",
-                capability="create_file",
-                operation="CREATE_FILE",
-                payload={"path": str(second), "content": "two"},
-                dependencies=["task-1"],
-            ),
-        ],
+    assert (
+        workflows.workflows[result["workflow"]["workflow_id"]].status
+        == "completed"
+    )
+    assert any(
+        item["stage"] == "agent_bus.dispatch"
+        for item in result["trace"]
     )
 
-    assert result["verified"] is True
-    assert first.exists() and second.exists()
-    assert workflows.workflows["workflow-multi"].tasks["task-1"].status == "completed"
-    assert workflows.workflows["workflow-multi"].tasks["task-2"].status == "completed"
 
 def test_unauthorized_capability_never_reaches_agent(tmp_path):
     platform, _, registry, _, _ = build_platform(tmp_path)
@@ -199,6 +163,48 @@ def test_unauthorized_capability_never_reaches_agent(tmp_path):
     assert audit[0]["outcome"] == "denied"
     assert audit[0]["error_type"] == "PermissionError"
 
+
+def test_multi_step_dependency_execution(tmp_path):
+    platform, _, _, goals, workflows = build_platform(tmp_path)
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    goal = goals.create_goal("goal-multi", "Create two files")
+
+    result = platform.execute_workflow(
+        goal_id=goal.goal_id,
+        workflow_id="workflow-multi",
+        request_id="req-multi",
+        tasks=[
+            TaskSpec(
+                task_id="task-1",
+                description="Create first file",
+                capability="create_file",
+                operation="CREATE_FILE",
+                payload={"path": str(first), "content": "one"},
+            ),
+            TaskSpec(
+                task_id="task-2",
+                description="Create second file",
+                capability="create_file",
+                operation="CREATE_FILE",
+                payload={"path": str(second), "content": "two"},
+                dependencies=["task-1"],
+            ),
+        ],
+    )
+
+    assert result["verified"] is True
+    assert first.exists() and second.exists()
+    assert (
+        workflows.workflows["workflow-multi"].tasks["task-1"].status
+        == "completed"
+    )
+    assert (
+        workflows.workflows["workflow-multi"].tasks["task-2"].status
+        == "completed"
+    )
+
+
 def test_route_owner_mismatch_is_denied_before_dispatch(tmp_path):
     platform, _, registry, _, _ = build_platform(tmp_path)
     target = tmp_path / "route-owner-blocked.txt"
@@ -207,7 +213,9 @@ def test_route_owner_mismatch_is_denied_before_dispatch(tmp_path):
     # owner of the create_file capability route.
     platform.select_agent = lambda capability: "application-agent"
 
-    with pytest.raises(PermissionError, match="does not match route owner"):
+    with pytest.raises(
+        PermissionError, match="does not match route owner"
+    ):
         platform.execute_intent(
             intent="create_file",
             description="Reject a mismatched route owner",
@@ -222,7 +230,8 @@ def test_route_owner_mismatch_is_denied_before_dispatch(tmp_path):
 
     trace = platform.trace["req-route-owner-mismatch"]
     denied = [
-        event for event in trace
+        event
+        for event in trace
         if event["stage"] == "security.authorization"
         and event["status"] == "denied"
     ]
@@ -238,3 +247,144 @@ def test_route_owner_mismatch_is_denied_before_dispatch(tmp_path):
     audit = registry.get_audit_log("req-route-owner-mismatch")
     assert len(audit) == 1
     assert audit[0]["outcome"] == "denied"
+
+
+def test_workflow_exception_marks_workflow_and_goal_failed(
+    tmp_path, monkeypatch
+):
+    platform, _, _, goals, workflows = build_platform(tmp_path)
+    goal = goals.create_goal(
+        "goal-exception",
+        "Trigger workflow exception",
+    )
+    workflow_id = "workflow-exception"
+    original_error = RuntimeError("Simulated workflow crash")
+
+    def raise_workflow_exception(*args, **kwargs):
+        workflows.create_workflow(
+            workflow_id, goal.goal_id, "Workflow that crashes"
+        )
+        raise original_error
+
+    monkeypatch.setattr(
+        platform,
+        "_execute_workflow_impl",
+        raise_workflow_exception,
+    )
+
+    with pytest.raises(
+        RuntimeError, match="Simulated workflow crash"
+    ) as exc_info:
+        platform.execute_workflow(
+            goal_id=goal.goal_id,
+            workflow_id=workflow_id,
+            request_id="req-exception",
+            tasks=[
+                TaskSpec(
+                    task_id="task-exception",
+                    description="Simulated task",
+                    capability="create_file",
+                    operation="CREATE_FILE",
+                    payload={},
+                )
+            ],
+        )
+
+    assert exc_info.value is original_error
+    assert workflows.workflows[workflow_id].status == "failed"
+    assert goals.goals[goal.goal_id].status == "failed"
+
+
+def test_workflow_exception_preserves_completed_goal(
+    tmp_path, monkeypatch
+):
+    platform, _, _, goals, workflows = build_platform(tmp_path)
+    goal = goals.create_goal(
+        "goal-already-completed",
+        "Preserve completed goal",
+    )
+    goal.status = "completed"
+
+    workflow_id = "workflow-completed-goal"
+    original_error = RuntimeError("Simulated workflow crash")
+
+    def raise_workflow_exception(*args, **kwargs):
+        workflows.create_workflow(
+            workflow_id, goal.goal_id, "Workflow that crashes"
+        )
+        raise original_error
+
+    monkeypatch.setattr(
+        platform,
+        "_execute_workflow_impl",
+        raise_workflow_exception,
+    )
+
+    with pytest.raises(
+        RuntimeError, match="Simulated workflow crash"
+    ):
+        platform.execute_workflow(
+            goal_id=goal.goal_id,
+            workflow_id=workflow_id,
+            request_id="req-completed-goal",
+            tasks=[
+                TaskSpec(
+                    task_id="task-completed-goal",
+                    description="Simulated task",
+                    capability="create_file",
+                    operation="CREATE_FILE",
+                    payload={},
+                )
+            ],
+        )
+
+    assert goals.goals[goal.goal_id].status == "completed"
+    assert workflows.workflows[workflow_id].status == "failed"
+
+
+def test_completed_workflow_is_not_overwritten_as_failed(
+    tmp_path, monkeypatch
+):
+    platform, _, _, goals, workflows = build_platform(tmp_path)
+    goal = goals.create_goal(
+        "goal-completed-workflow",
+        "Preserve completed workflow",
+    )
+
+    workflow_id = "workflow-already-completed"
+    original_error = RuntimeError("Simulated workflow crash")
+
+    def complete_then_raise(*args, **kwargs):
+        workflow = workflows.create_workflow(
+            workflow_id,
+            goal.goal_id,
+            "Already completed workflow",
+        )
+        workflow.status = "completed"
+        raise original_error
+
+    monkeypatch.setattr(
+        platform,
+        "_execute_workflow_impl",
+        complete_then_raise,
+    )
+
+    with pytest.raises(
+        RuntimeError, match="Simulated workflow crash"
+    ):
+        platform.execute_workflow(
+            goal_id=goal.goal_id,
+            workflow_id=workflow_id,
+            request_id="req-completed-workflow",
+            tasks=[
+                TaskSpec(
+                    task_id="task-completed-workflow",
+                    description="Simulated task",
+                    capability="create_file",
+                    operation="CREATE_FILE",
+                    payload={},
+                )
+            ],
+        )
+
+    assert workflows.workflows[workflow_id].status == "completed"

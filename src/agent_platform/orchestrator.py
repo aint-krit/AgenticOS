@@ -112,7 +112,7 @@ class AgentPlatform:
             raise ValueError(
                 f"Capability '{capability}' already has an owner."
             )
-        
+
         target_agent = self.bus.agents[agent_id]
         if hasattr(target_agent, "set_permission_manager"):
             target_agent.set_permission_manager(
@@ -299,6 +299,53 @@ class AgentPlatform:
         request_id: str,
         tasks: list[TaskSpec],
     ) -> dict[str, Any]:
+        """Execute a workflow and synchronize goal/workflow failure states."""
+        try:
+            return self._execute_workflow_impl(
+                goal_id=goal_id,
+                workflow_id=workflow_id,
+                request_id=request_id,
+                tasks=tasks,
+            )
+        except Exception as error:
+            try:
+                workflow = self.workflow_manager.get_workflow(workflow_id)
+                if workflow.status not in {
+                    "completed",
+                    "cancelled",
+                    "failed",
+                }:
+                    self.workflow_manager.fail_workflow(workflow_id)
+            except (ValueError, RuntimeError):
+                pass
+
+            try:
+                goal = self.goal_manager.get_goal(goal_id)
+                if goal.status not in {
+                    "completed",
+                    "cancelled",
+                    "failed",
+                }:
+                    goal.fail()
+                    self._record(
+                        request_id,
+                        "goal",
+                        "failed",
+                        goal_id=goal_id,
+                        error=str(error),
+                    )
+            except (ValueError, RuntimeError):
+                pass
+
+            raise
+
+    def _execute_workflow_impl(
+        self,
+        goal_id: str,
+        workflow_id: str,
+        request_id: str,
+        tasks: list[TaskSpec],
+    ) -> dict[str, Any]:
         if not tasks:
             raise ValueError("Workflow requires at least one task.")
         self._ensure_coordinator()
@@ -393,8 +440,6 @@ class AgentPlatform:
                         raise PermissionError(error_message)
 
                     try:
-                        # The registry is the central permission gate and
-                        # audits denials before re-raising PermissionError.
                         authorized_result = self.capability_registry.execute(
                             agent_id=agent_id,
                             capability=spec.capability,
@@ -415,8 +460,6 @@ class AgentPlatform:
                             error_message=error_message,
                             route_owner=route_owner,
                         )
-                        # Authorization failures are not transient; do not
-                        # retry a request that policy explicitly denied.
                         raise
                     except Exception as error:
                         response = {
@@ -536,7 +579,7 @@ class AgentPlatform:
 
         goal_id = f"goal-{uuid4().hex}"
         workflow_id = f"workflow-{uuid4().hex}"
-        goal = self.goal_manager.create_goal(
+        self.goal_manager.create_goal(
             goal_id=goal_id,
             description=description,
             metadata={

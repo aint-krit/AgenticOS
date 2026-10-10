@@ -172,7 +172,10 @@ class WorkflowManager:
         task.retry()
 
         return task
-
+    def fail_workflow(self, workflow_id: str) -> Workflow:
+        workflow = self.get_workflow(workflow_id)
+        workflow.fail()
+        return workflow
     def replan_workflow(
         self,
         workflow_id: str,

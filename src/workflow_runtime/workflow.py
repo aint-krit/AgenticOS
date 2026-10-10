@@ -144,7 +144,15 @@ class Workflow:
             self.status = "completed"
 
         self.updated_at = self._timestamp()
+    def fail(self) -> None:
+        if self.status in {"completed", "cancelled"}:
+            raise RuntimeError(
+                f"Workflow '{self.workflow_id}' cannot fail "
+                f"from status '{self.status}'."
+            )
 
+        self.status = "failed"
+        self.updated_at = self._timestamp()
     def replan(self) -> None:
         if self.status not in {"failed", "running"}:
             raise RuntimeError(
