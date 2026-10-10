@@ -21,6 +21,7 @@ class FileAgent(Agent):
         self,
         agent_id: str = "file-agent",
         permission_manager: PermissionManager | None = None,
+        workspace_root: str | Path | None = None,
     ):
         super().__init__(
             agent_id=agent_id,
@@ -33,7 +34,13 @@ class FileAgent(Agent):
                 "delete_file",
             ],
         )
+
         self.permission_manager = permission_manager
+        self.workspace_root = (
+            Path(workspace_root).resolve()
+            if workspace_root is not None
+            else None
+        )
 
     def set_permission_manager(
         self,
@@ -62,11 +69,28 @@ class FileAgent(Agent):
             capability,
         )
 
-    @staticmethod
-    def _validate_path(path: str) -> Path:
+    def _validate_path(self, path: str) -> Path:
         if not isinstance(path, str) or not path.strip():
             raise ValueError("A non-empty file path is required.")
-        return Path(path)
+
+        candidate = Path(path)
+
+        # Preserve existing standalone FileAgent behaviour.
+        if self.workspace_root is None:
+            return candidate
+
+        # When confined to a workspace, only relative paths are allowed.
+        if candidate.is_absolute():
+            raise ValueError("Absolute paths are not allowed.")
+
+        resolved = (self.workspace_root / candidate).resolve()
+
+        if not resolved.is_relative_to(self.workspace_root):
+            raise ValueError(
+                "Path must remain inside the AgenticOS workspace."
+            )
+
+        return resolved
 
     def _create_file(
         self,
@@ -80,13 +104,20 @@ class FileAgent(Agent):
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-        return {"status": "created", "path": str(file_path)}
+
+        return {
+            "status": "created",
+            "path": str(file_path),
+        }
 
     def _read_file(self, path: str) -> dict[str, Any]:
         file_path = self._validate_path(path)
 
         if not file_path.exists():
             raise FileNotFoundError(f"File does not exist: {path}")
+
+        if not file_path.is_file():
+            raise IsADirectoryError(f"Path is not a file: {path}")
 
         return {
             "status": "read",
@@ -102,7 +133,11 @@ class FileAgent(Agent):
         file_path = self._validate_path(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-        return {"status": "written", "path": str(file_path)}
+
+        return {
+            "status": "written",
+            "path": str(file_path),
+        }
 
     def _delete_file(self, path: str) -> dict[str, Any]:
         file_path = self._validate_path(path)
@@ -110,8 +145,15 @@ class FileAgent(Agent):
         if not file_path.exists():
             raise FileNotFoundError(f"File does not exist: {path}")
 
+        if not file_path.is_file():
+            raise IsADirectoryError(f"Path is not a file: {path}")
+
         file_path.unlink()
-        return {"status": "deleted", "path": str(file_path)}
+
+        return {
+            "status": "deleted",
+            "path": str(file_path),
+        }
 
     def create_file(
         self,
