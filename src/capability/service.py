@@ -1,4 +1,4 @@
-
+﻿
 from typing import Any
 
 from src.capability.connector import Connector
@@ -194,8 +194,8 @@ class CapabilityService:
             raise
 
         connector = self.connectors[connector_id]
- 
-       
+
+
         try:
             result = connector.execute(operation=operation, **kwargs)
         except Exception as error:
@@ -207,7 +207,7 @@ class CapabilityService:
                 error=error,
             )
             raise
-       
+
 
         self.registry.record_audit(
             request_id=request_id,
