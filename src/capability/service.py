@@ -7,7 +7,7 @@ from src.capability.skill import SkillLibrary
 
 
 class CapabilityService:
-    """High-level orchestration for capabilities, skills, and connectors."""
+    """Orchestrate capabilities, skills, and connectors with auditing."""
 
     def __init__(
         self,
@@ -19,6 +19,34 @@ class CapabilityService:
             skill_library if skill_library is not None else SkillLibrary()
         )
         self.connectors: dict[str, Connector] = {}
+
+    def _audit_failure(
+        self,
+        *,
+        request_id: str | None,
+        agent_id: str,
+        capability: str,
+        error: Exception,
+        tool_id: str | None = None,
+    ) -> None:
+        """Record a service-level failure without masking the original error."""
+        outcome = (
+            "denied"
+            if isinstance(error, PermissionError)
+            else "rejected"
+            if isinstance(error, (ValueError, KeyError))
+            else "failed"
+        )
+
+        self.registry.record_audit(
+            request_id=request_id,
+            agent_id=agent_id,
+            capability=capability,
+            tool_id=tool_id,
+            outcome=outcome,
+            error_type=type(error).__name__,
+            error=str(error),
+        )
 
     def register_connector(
         self,
@@ -62,6 +90,7 @@ class CapabilityService:
         capability: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        # The registry owns capability execution and its audit records.
         return self.registry.execute(
             agent_id=agent_id,
             capability=capability,
@@ -74,18 +103,41 @@ class CapabilityService:
         skill_id: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Preflight all capabilities before executing any skill operation."""
-        capabilities = self.skill_library.resolve_capabilities(skill_id)
+        """Preflight every capability before performing skill side effects."""
+        request_id = kwargs.get("request_id")
 
-        # Phase 1: validate the complete skill without executing side effects.
-        for capability in capabilities:
-            self.registry.get_tool_for_capability(capability)
-            self.registry.permission_manager.require_permission(
-                agent_id,
-                capability,
+        try:
+            capabilities = self.skill_library.resolve_capabilities(skill_id)
+        except Exception as error:
+            self._audit_failure(
+                request_id=request_id,
+                agent_id=agent_id,
+                capability=f"skill:{skill_id}",
+                error=error,
             )
+            raise
 
-        # Phase 2: execute only after the entire preflight succeeds.
+        # Phase 1: validate the complete skill before any operation executes.
+        for capability in capabilities:
+            tool_id = None
+            try:
+                tool = self.registry.get_tool_for_capability(capability)
+                tool_id = getattr(tool, "tool_id", None)
+                self.registry.permission_manager.require_permission(
+                    agent_id,
+                    capability,
+                )
+            except Exception as error:
+                self._audit_failure(
+                    request_id=request_id,
+                    agent_id=agent_id,
+                    capability=capability,
+                    tool_id=tool_id,
+                    error=error,
+                )
+                raise
+
+        # Phase 2: execute only after the complete preflight succeeds.
         results = []
         for capability in capabilities:
             results.append(
@@ -114,21 +166,56 @@ class CapabilityService:
         operation: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Authorize before invoking a connector."""
-        self.registry.get_tool_for_capability(capability)
-        self.registry.permission_manager.require_permission(
-            agent_id,
-            capability,
-        )
+        """Authorize and audit connector execution."""
+        request_id = kwargs.pop("request_id", None)
+        tool_id = None
+        try:
+            tool = self.registry.get_tool_for_capability(capability)
+            tool_id = getattr(tool, "tool_id", None)
 
-        if connector_id not in self.connectors:
-            raise ValueError(
-                f"Connector '{connector_id}' is not registered."
+            self.registry.permission_manager.require_permission(
+                agent_id,
+                capability,
             )
 
-        connector = self.connectors[connector_id]
-        result = connector.execute(operation=operation, **kwargs)
+            if connector_id not in self.connectors:
+                raise ValueError(
+                    f"Connector '{connector_id}' is not registered."
+                )
 
+        except Exception as error:
+            self._audit_failure(
+                request_id=request_id,
+                agent_id=agent_id,
+                capability=capability,
+                tool_id=tool_id,
+                error=error,
+            )
+            raise
+
+        connector = self.connectors[connector_id]
+ 
+       
+        try:
+            result = connector.execute(operation=operation, **kwargs)
+        except Exception as error:
+            self._audit_failure(
+                request_id=request_id,
+                agent_id=agent_id,
+                capability=capability,
+                tool_id=tool_id,
+                error=error,
+            )
+            raise
+       
+
+        self.registry.record_audit(
+            request_id=request_id,
+            agent_id=agent_id,
+            capability=capability,
+            tool_id=tool_id,
+            outcome="success" if result is not None else "unverified",
+        )
         return {
             "status": "completed",
             "agent_id": agent_id,

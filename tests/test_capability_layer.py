@@ -384,3 +384,182 @@ def test_skill_preflight_prevents_partial_execution():
         )
 
     assert executed == []
+
+def test_skill_permission_denial_is_audited():
+    registry = CapabilityRegistry()
+
+    registry.register_tool(
+        Tool(
+            tool_id="private-tool",
+            name="Private tool",
+            description="A tool requiring explicit permission.",
+            handler=lambda: "executed",
+            capabilities=["private_capability"],
+        )
+    )
+
+    skills = SkillLibrary()
+    skills.register_skill(
+        Skill(
+            skill_id="private-skill",
+            name="Private skill",
+            description="Requires private access.",
+            capabilities=["private_capability"],
+        )
+    )
+
+    service = CapabilityService(registry, skills)
+
+    with pytest.raises(PermissionError):
+        service.execute_skill(
+            agent_id="untrusted-agent",
+            skill_id="private-skill",
+            request_id="req-skill-denied",
+        )
+
+    events = registry.get_audit_log("req-skill-denied")
+
+    assert len(events) == 1
+    assert events[0]["outcome"] == "denied"
+    assert events[0]["agent_id"] == "untrusted-agent"
+    assert events[0]["capability"] == "private_capability"
+    assert events[0]["tool_id"] == "private-tool"
+    assert events[0]["error_type"] == "PermissionError"
+
+from src.capability.connector import FunctionConnector
+
+
+def test_connector_permission_denial_is_audited():
+    registry = CapabilityRegistry()
+    registry.register_tool(
+        Tool(
+            tool_id="system-tool",
+            name="System tool",
+            description="Represents an authorized connector capability.",
+            handler=lambda: "ok",
+            capabilities=["system.read"],
+        )
+    )
+
+    skills = SkillLibrary()
+    service = CapabilityService(registry, skills)
+
+    connector = FunctionConnector(
+        connector_id="system-connector",
+        name="System connector",
+    )
+    connector.register_operation(
+        "read",
+        lambda: "secret",
+    )
+    connector.connect()
+    service.register_connector(connector)
+
+    with pytest.raises(PermissionError):
+        service.execute_connector(
+            agent_id="untrusted-agent",
+            connector_id="system-connector",
+            capability="system.read",
+            operation="read",
+            request_id="req-connector-denied",
+        )
+
+    events = registry.get_audit_log("req-connector-denied")
+
+    assert len(events) == 1
+    assert events[0]["outcome"] == "denied"
+    assert events[0]["agent_id"] == "untrusted-agent"
+    assert events[0]["capability"] == "system.read"
+    assert events[0]["tool_id"] == "system-tool"
+    assert events[0]["error_type"] == "PermissionError"
+
+
+def test_connector_execution_failure_is_audited():
+    registry = CapabilityRegistry()
+    registry.register_tool(
+        Tool(
+            tool_id="system-tool",
+            name="System tool",
+            description="Represents a connector capability.",
+            handler=lambda: "ok",
+            capabilities=["system.read"],
+        )
+    )
+    registry.grant_permission("executor-agent", "system.read")
+
+    service = CapabilityService(registry, SkillLibrary())
+
+    connector = FunctionConnector(
+        connector_id="system-connector",
+        name="System connector",
+    )
+
+    def fail_operation(**kwargs):
+        raise RuntimeError("connector operation failed")
+
+    connector.register_operation("read", fail_operation)
+    connector.connect()
+    service.register_connector(connector)
+
+    with pytest.raises(RuntimeError, match="connector operation failed"):
+        service.execute_connector(
+            agent_id="executor-agent",
+            connector_id="system-connector",
+            capability="system.read",
+            operation="read",
+            request_id="req-connector-failure",
+        )
+
+    events = registry.get_audit_log("req-connector-failure")
+
+    assert len(events) == 1
+    assert events[0]["outcome"] == "failed"
+    assert events[0]["agent_id"] == "executor-agent"
+    assert events[0]["capability"] == "system.read"
+    assert events[0]["tool_id"] == "system-tool"
+    assert events[0]["error_type"] == "RuntimeError"
+
+def test_connector_request_id_is_not_forwarded_to_operation():
+    registry = CapabilityRegistry()
+    registry.register_tool(
+        Tool(
+            tool_id="system-tool",
+            name="System tool",
+            description="Represents a connector capability.",
+            handler=lambda: "ok",
+            capabilities=["system.read"],
+        )
+    )
+    registry.grant_permission("executor-agent", "system.read")
+
+    service = CapabilityService(registry, SkillLibrary())
+    connector = FunctionConnector(
+        connector_id="system-connector",
+        name="System connector",
+    )
+
+    received = {}
+
+    def read_operation(path):
+        received["path"] = path
+        return "read complete"
+
+    connector.register_operation("read", read_operation)
+    connector.connect()
+    service.register_connector(connector)
+
+    result = service.execute_connector(
+        agent_id="executor-agent",
+        connector_id="system-connector",
+        capability="system.read",
+        operation="read",
+        path="/tmp/example.txt",
+        request_id="req-connector-arguments",
+    )
+
+    assert received == {"path": "/tmp/example.txt"}
+    assert result["result"] == "read complete"
+
+    events = registry.get_audit_log("req-connector-arguments")
+    assert len(events) == 1
+    assert events[0]["outcome"] == "success"
