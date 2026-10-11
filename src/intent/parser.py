@@ -173,7 +173,7 @@ class IntentParser:
             )
 
         # 6. System telemetry / Kernel intelligence
-        if any(term in lower for term in ["cpu", "ram", "memory", "usage", "system stats", "telemetry", "system info"]):
+        if any(term in lower for term in ["cpu", "ram", "memory", "usage", "system stats", "telemetry", "system info", "why is my system slow", "system slow", "lag", "bottleneck"]):
             return ParsedIntent(
                 intent="system_info",
                 confidence=0.95,

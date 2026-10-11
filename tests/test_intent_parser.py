@@ -50,6 +50,12 @@ def test_parse_system_telemetry(parser):
     assert result.intent == "system_info"
 
 
+def test_parse_system_diagnostics(parser):
+    result = parser.parse("Why is my system slow?")
+    assert result.intent == "system_info"
+    assert result.confidence > 0.8
+
+
 def test_parse_memory(parser):
     result = parser.parse("Remember user email is test@agenticos.local")
     assert result.intent == "remember"

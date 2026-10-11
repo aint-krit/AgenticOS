@@ -1,0 +1,29 @@
+[Unit]
+Description=AgenticOS Daemon & Microkernel Runtime
+After=network.target local-fs.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=agenticos
+Group=agenticos
+WorkingDirectory=/opt/agenticos
+Environment="PATH=/opt/agenticos/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONPATH=/opt/agenticos"
+Environment="AGENTICOS_WORKSPACE=/opt/agenticos/workspace"
+ExecStart=/opt/agenticos/venv/bin/python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agenticos
+
+# Sandboxing & Security Hardening
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
