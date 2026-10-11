@@ -1,5 +1,8 @@
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.agents.memory_agent import MemoryAgent
 from src.knowledge.episodic_store import EpisodicMemoryStore
@@ -70,7 +73,7 @@ def main():
             },
         )
 
-        print("    ✓ 3 memories stored")
+        print("    [+] 3 memories stored")
 
         # ---------------------------------------------------------
         # 2. RETRIEVE
@@ -118,7 +121,7 @@ def main():
         if retrieved["status"] == "found":
             remembered_context = retrieved["content"]
 
-            print("    ✓ Memory successfully retrieved")
+            print("    [+] Memory successfully retrieved")
             print(
                 f"    Context supplied to agent: "
                 f"{remembered_context}"
@@ -190,7 +193,7 @@ def main():
         )
 
         if len(remaining) == 0:
-            print("    ✓ Memory store is empty")
+            print("    [+] Memory store is empty")
 
         print("\n" + "=" * 70)
         print("Knowledge + Memory workflow completed successfully.")

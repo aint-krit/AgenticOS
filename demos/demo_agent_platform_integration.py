@@ -1,5 +1,8 @@
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.agent_bus.bus import AgentBus
 from src.agent_runtime.agent import Agent

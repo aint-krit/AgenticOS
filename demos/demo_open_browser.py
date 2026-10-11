@@ -1,4 +1,8 @@
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.agent_bus.bus import AgentBus
 from src.agents.ecosystem import create_core_agents
@@ -31,7 +35,7 @@ def main() -> None:
         agent.start()
 
         print(
-            f"    ✓ {agent.name} "
+            f"    [+] {agent.name} "
             f"({agent.agent_id})"
         )
 

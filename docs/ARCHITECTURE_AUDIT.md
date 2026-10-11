@@ -16,27 +16,28 @@ A source-to-test mapping does not establish complete implementation, production 
 | 4     | Workflow Runtime         | `src/workflow_runtime/`                                                            | `tests/test_workflow_runtime.py`                                                                                |
 | 5     | Global Agent Manager     | `src/global_agent_manager/`                                                        | `tests/test_global_agent_manager.py`                                                                            |
 | 6     | Agent Runtime and Bus    | `src/agent_runtime/`, `src/agent_bus/`                                             | `tests/test_agent_bus.py`, `tests/test_agents.py`                                                               |
-| 7     | Knowledge and Capability | `src/capability/`, `src/memory_knowledge/`                                         | `tests/test_capability_layer.py`, `tests/test_memory_knowledge.py`                                              |
+| 7     | Knowledge and Capability | `src/capability/`, `src/knowledge/`, `src/agents/memory_agent.py`                  | `tests/test_capability_layer.py`, `tests/test_memory_knowledge.py`                                              |
 | 8     | System Services          | `src/system_services/`                                                             | `tests/test_system_services.py`                                                                                 |
 | 9     | Kernel Intelligence      | `src/kernel_intelligence/`                                                         | `tests/test_kernel_intelligence.py`                                                                             |
 | 10    | Linux and Deployment     | `packaging/install.sh`, `packaging/agenticos.service`, `packaging/README_LINUX.md` | Configuration review only; Linux installation and runtime behavior require validation on a supported Linux host |
 
 ## Latest Recorded Test Results
 
-The most recent recorded full test run completed with **215 passed and 1 warning**. Rerun the suite before treating this result as the final result for a commit.
+The most recent recorded full test run completed with **215 passed and 1 warning** (`pytest -q`, 104.18s).
+All 13 standalone demo scripts in `demos/` pass with exit code 0.
 
-The warning concerned Starlette's `TestClient` integration with `httpx`. It did not cause the recorded tests to fail.
+The warning concerned Starlette's `TestClient` integration with `httpx` (`StarletteDeprecationWarning`). It did not cause tests to fail.
 
 ## Performance Benchmark Results
 
-The latest recorded benchmark run reported:
+The latest benchmark run (`python benchmarks/run_benchmarks.py`) reported:
 
 | Measurement                |           Recorded Result |         Defined Benchmark Limit |
 | -------------------------- | ------------------------: | ------------------------------: |
-| Agent Bus latency          | 5.08 microseconds/message |              1,000 microseconds |
-| Intent Parser latency      | 17.11 microseconds/prompt |              5,000 microseconds |
-| End-to-end prompt workflow |         3.10 milliseconds |                 50 milliseconds |
-| Kernel telemetry sampling  |   203 milliseconds/sample | No benchmark-script SLA defined |
+| Agent Bus latency          | 4.85 microseconds/message |              1,000 microseconds |
+| Intent Parser latency      | 16.91 microseconds/prompt |              5,000 microseconds |
+| End-to-end prompt workflow |         3.33 milliseconds |                 50 milliseconds |
+| Kernel telemetry sampling  | 202.96 milliseconds/sample| No benchmark-script SLA defined |
 
 The first three measurements passed their benchmark-script limits in that run. These are observed measurements, not guarantees of performance on other machines or under different loads. Kernel telemetry is informational in the benchmark script; the performance test suite separately checks that an individual telemetry collection completes in under 0.5 seconds.
 

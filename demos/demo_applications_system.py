@@ -1,5 +1,8 @@
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.agents.ecosystem import create_core_agents
 from src.agent_bus.bus import AgentBus
@@ -157,7 +160,7 @@ def main() -> None:
     # 6. Final verification
     # ---------------------------------------------------------
 
-    assert len(manager.discover_agents()) == 8
+    assert len(manager.discover_agents()) == 9
 
     print("\n" + "=" * 70)
     print(
